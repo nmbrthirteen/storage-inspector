@@ -1,0 +1,35 @@
+# Dependencies generated locally.
+vendor/
+node_modules/
+
+# Build artifacts.
+build/
+dist/
+*.zip
+
+# Composer/package manager local files.
+composer.lock
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# OS/editor noise.
+.DS_Store
+.AppleDouble
+.LSOverride
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and local environment files.
+*.log
+*.tmp
+.env
+.env.*
+
+# Test/coverage caches.
+.phpunit.result.cache
+.phpcs-cache
+coverage/
+.nyc_output/

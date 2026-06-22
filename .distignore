@@ -1,0 +1,17 @@
+.git
+.github
+.gitignore
+.distignore
+.DS_Store
+.idea
+.vscode
+node_modules
+vendor
+build
+dist
+coverage
+.phpunit.result.cache
+.phpcs-cache
+*.log
+*.tmp
+*.zip
