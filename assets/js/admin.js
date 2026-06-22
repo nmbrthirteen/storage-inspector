@@ -8,6 +8,7 @@
         perPage: 50,
         totalPages: 1,
         lastRowsFetch: 0,
+        expanded: {},
     };
     const els = {};
 
@@ -82,7 +83,7 @@
             return response.json();
         }).then(function (json) {
             if (!json.success) {
-                throw new Error((json.data && json.data.message) || 'Request failed.');
+                throw new Error((json.data && json.data.message) || i18n.requestError || 'Request failed.');
             }
             return json.data;
         });
@@ -91,11 +92,11 @@
     function startScan() {
         if (els.start) {
             els.start.disabled = true;
-            els.start.textContent = 'Starting...';
+            els.start.textContent = i18n.starting || 'Starting...';
         }
         window.localStorage.removeItem(bannerKey);
-        setStatus('Starting scan...');
-        setTableLoading('Starting new scan...');
+        setStatus(i18n.startingScan || 'Starting scan...');
+        setTableLoading(i18n.startingNew || 'Starting new scan...');
         request('start').then(function (data) {
             renderState(data);
             fetchRows();
@@ -134,25 +135,27 @@
             state.scanning = false;
             if (els.start) {
                 els.start.disabled = false;
-                els.start.textContent = 'Start new scan';
+                els.start.textContent = i18n.startNewScan || 'Start new scan';
             }
         }).catch(function (error) {
             state.scanning = false;
             if (els.start) {
                 els.start.disabled = false;
-                els.start.textContent = 'Start new scan';
+                els.start.textContent = i18n.startNewScan || 'Start new scan';
             }
             showError(error);
         });
     }
 
-    function fetchRows() {
+    function fetchRows(silent) {
         if (!StorageInspector.isInspectorPage || !els.body) {
             return;
         }
 
         renderHead();
-        setTableLoading('Loading rows...');
+        if (!silent) {
+            setTableLoading(i18n.loadingRows || 'Loading rows...');
+        }
         request('rows', {
             kind: state.kind,
             page: state.page,
@@ -168,7 +171,7 @@
         const now = Date.now();
         if (force || now - state.lastRowsFetch > 3000) {
             state.lastRowsFetch = now;
-            fetchRows();
+            fetchRows(true);
         }
     }
 
@@ -189,9 +192,9 @@
         if (data.status === 'empty') {
             setStatus(i18n.empty || 'No scan has been run yet.');
         } else if (data.status === 'running') {
-            setStatus('Scanning... ' + number(data.dirs || 0) + ' folders checked, ' + number(data.queued || 0) + ' queued, ' + number(data.files || 0) + ' files found.');
+            setStatus(format(i18n.scanning || 'Scanning... %1$s folders checked, %2$s queued, %3$s files found.', number(data.dirs || 0), number(data.queued || 0), number(data.files || 0)));
         } else {
-            setStatus('Scan complete. ' + number(data.files || 0) + ' files across ' + number(data.dirs || 0) + ' folders, using ' + (data.bytesHuman || '0 B') + '.');
+            setStatus(format(i18n.complete || 'Scan complete. %1$s files across %2$s folders, using %3$s.', number(data.files || 0), number(data.dirs || 0), data.bytesHuman || '0 B'));
         }
 
         renderSummary(data);
@@ -242,10 +245,10 @@
 
     function renderSummary(data) {
         els.summary.innerHTML = [
-            summaryCard('Total storage', sizeLabel(data.bytesHuman || '0 B')),
-            summaryCard('Files', number(data.files || 0)),
-            summaryCard('Folders', number(data.dirs || 0)),
-            summaryCard('Errors', number(data.errors || 0)),
+            summaryCard(i18n.totalStorage || 'Total storage', sizeLabel(data.bytesHuman || '0 B')),
+            summaryCard(i18n.files || 'Files', number(data.files || 0)),
+            summaryCard(i18n.folders || 'Folders', number(data.dirs || 0)),
+            summaryCard(i18n.errors || 'Errors', number(data.errors || 0)),
         ].join('');
     }
 
@@ -255,8 +258,8 @@
         }
 
         els.root.hidden = false;
-        els.root.innerHTML = '<span>Scanned root</span><code>' + escapeHtml(data.root) + '</code>' +
-            '<button type="button" class="button button-small si-copy" data-copy="' + escapeAttr(data.root) + '">Copy path</button>';
+        els.root.innerHTML = '<span>' + escapeHtml(i18n.scannedRoot || 'Scanned root') + '</span><code>' + escapeHtml(data.root) + '</code>' +
+            '<button type="button" class="button button-small si-copy" data-copy="' + escapeAttr(data.root) + '">' + escapeHtml(i18n.copyPath || 'Copy path') + '</button>';
         bindCopyButtons(els.root);
     }
 
@@ -272,17 +275,18 @@
         }
 
         els.rootWarning.hidden = false;
-        els.rootWarning.innerHTML = '<p>These results were scanned from an old root. Start a new scan to use <code>' +
-            escapeHtml(data.expectedRoot || '') + '</code>.</p>';
+        els.rootWarning.innerHTML = '<p>' +
+            format(i18n.staleRoot || 'These results were scanned from an old root. Start a new scan to use %s.', '<code>' + escapeHtml(data.expectedRoot || '') + '</code>') +
+            '</p>';
     }
 
     function renderHead() {
         if (state.kind === 'groups') {
-            els.head.innerHTML = '<tr><th>Area</th><th>Size</th><th>Files</th><th>Folders</th><th>Details</th></tr>';
+            els.head.innerHTML = headRow([i18n.area || 'Area', i18n.size || 'Size', i18n.files || 'Files', i18n.folders || 'Folders', i18n.details || 'Details']);
         } else if (state.kind === 'errors') {
-            els.head.innerHTML = '<tr><th>Path</th><th>Message</th></tr>';
+            els.head.innerHTML = headRow([i18n.path || 'Path', i18n.message || 'Message']);
         } else {
-            els.head.innerHTML = '<tr><th>Path</th><th>Type</th><th>Size</th><th>Reason</th><th>Action</th></tr>';
+            els.head.innerHTML = headRow([i18n.folderFile || 'Folder / file', i18n.type || 'Type', i18n.size || 'Size', i18n.reason || 'Reason', i18n.action || 'Action']);
         }
     }
 
@@ -297,7 +301,8 @@
 
     function renderRows(rows) {
         if (!rows.length) {
-            els.body.innerHTML = '<tr><td colspan="5">' + escapeHtml(i18n.noRows || 'No rows found.') + '</td></tr>';
+            const colspan = state.kind === 'errors' ? 2 : 5;
+            els.body.innerHTML = '<tr><td colspan="' + colspan + '">' + escapeHtml(i18n.noRows || 'No rows found.') + '</td></tr>';
             return;
         }
 
@@ -308,7 +313,8 @@
                 return '<tr><td>' + pathCell(row.path || '') + '</td><td>' + escapeHtml(row.message || '') + '</td></tr>';
             }).join('');
         } else {
-            els.body.innerHTML = rows.map(itemRow).join('');
+            els.body.innerHTML = rows.map(folderGroup).join('');
+            bindFolderToggles();
             els.body.querySelectorAll('.si-delete').forEach(function (button) {
                 button.addEventListener('click', deleteItem);
             });
@@ -322,7 +328,7 @@
         const meta = [
             details.version ? 'v' + details.version : '',
             details.author || '',
-            details.active ? 'Active' : '',
+            details.active ? (i18n.active || 'Active') : '',
         ].filter(Boolean).join(' · ');
         const icon = details.icon || 'dashicons-media-default';
         const iconMarkup = fallbackIcon(icon);
@@ -332,22 +338,66 @@
             '<td>' + sizeLabel(row.bytesHuman || '0 B') + '</td>' +
             '<td>' + number(row.files || 0) + '</td>' +
             '<td>' + number(row.dirs || 0) + '</td>' +
-            '<td>' + escapeHtml(row.reason || '') + (meta ? '<div class="si-muted">' + escapeHtml(meta) + '</div>' : '') + (details.uri ? '<div><a href="' + escapeAttr(details.uri) + '" target="_blank" rel="noreferrer">Plugin URI</a></div>' : '') + '</td>' +
+            '<td>' + escapeHtml(row.reason || '') + (meta ? '<div class="si-muted">' + escapeHtml(meta) + '</div>' : '') + (details.uri ? '<div><a href="' + escapeAttr(details.uri) + '" target="_blank" rel="noreferrer">' + escapeHtml(i18n.pluginUri || 'Plugin URI') + '</a></div>' : '') + '</td>' +
         '</tr>';
     }
 
-    function itemRow(item) {
-        const action = item.deletable
-            ? '<button type="button" class="button-link-delete si-delete" data-path="' + escapeAttr(item.path) + '" data-type="' + escapeAttr(item.type) + '">' + escapeHtml(i18n.delete || 'Delete') + '</button>'
+    function folderGroup(group, index) {
+        const path = group.path || '';
+        const open = !!state.expanded[path];
+        const children = (group.children || []).map(function (child) {
+            return childRow(child, index, open);
+        }).join('');
+        const count = number(group.files || 0) + ' ' + escapeHtml(i18n.largeFiles || 'large files');
+
+        return '<tr class="si-folder-row">' +
+            '<td><button type="button" class="si-toggle' + (open ? ' is-open' : '') + '" aria-expanded="' + (open ? 'true' : 'false') + '" data-group="' + index + '" data-path="' + escapeAttr(path) + '"><span class="si-toggle-icon" aria-hidden="true">▸</span></button>' +
+            '<code>' + escapeHtml(path) + '</code></td>' +
+            '<td><span class="si-muted">' + escapeHtml(i18n.folder || 'Folder') + '</span></td>' +
+            '<td>' + sizeLabel(group.bytesHuman || '0 B') + '</td>' +
+            '<td>' + count + '</td>' +
+            '<td></td>' +
+        '</tr>' + children;
+    }
+
+    function childRow(child, index, open) {
+        const action = child.deletable
+            ? '<button type="button" class="button-link-delete si-delete" data-path="' + escapeAttr(child.path) + '" data-type="' + escapeAttr(child.type) + '">' + escapeHtml(i18n.delete || 'Delete') + '</button>'
             : '<span class="si-muted">' + escapeHtml(i18n.protected || 'Protected') + '</span>';
 
-        return '<tr>' +
-            '<td>' + pathCell(item.path || '') + '<div class="si-muted">' + escapeHtml(item.area || '') + '</div></td>' +
-            '<td>' + escapeHtml(item.type || '') + '</td>' +
-            '<td>' + sizeLabel(item.bytesHuman || '0 B') + '</td>' +
-            '<td>' + escapeHtml(item.reason || '') + '</td>' +
+        return '<tr class="si-child-row" data-group="' + index + '"' + (open ? '' : ' hidden') + '>' +
+            '<td class="si-child-cell">' + pathCell(child.path || '') + '<div class="si-muted">' + escapeHtml(child.area || '') + '</div></td>' +
+            '<td>' + escapeHtml(fileType(child.path || '')) + '</td>' +
+            '<td>' + sizeLabel(child.bytesHuman || '0 B') + '</td>' +
+            '<td>' + escapeHtml(child.reason || '') + '</td>' +
             '<td>' + action + '</td>' +
         '</tr>';
+    }
+
+    function fileType(path) {
+        const dot = path.lastIndexOf('.');
+        const ext = dot > -1 ? path.slice(dot + 1).toUpperCase() : '';
+        return ext || (i18n.file || 'File');
+    }
+
+    function bindFolderToggles() {
+        els.body.querySelectorAll('.si-toggle').forEach(function (button) {
+            button.addEventListener('click', function () {
+                const group = button.dataset.group;
+                const path = button.dataset.path || '';
+                const expanded = button.getAttribute('aria-expanded') === 'true';
+                button.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+                button.classList.toggle('is-open', !expanded);
+                if (expanded) {
+                    delete state.expanded[path];
+                } else {
+                    state.expanded[path] = true;
+                }
+                els.body.querySelectorAll('.si-child-row[data-group="' + group + '"]').forEach(function (row) {
+                    row.hidden = expanded;
+                });
+            });
+        });
     }
 
     function deleteItem(event) {
@@ -374,7 +424,7 @@
         if (!els.page) {
             return;
         }
-        els.page.textContent = 'Page ' + number(data.page || 1) + ' of ' + number(data.totalPages || 1) + ' · ' + number(data.total || 0) + ' rows';
+        els.page.textContent = format(i18n.pager || 'Page %1$s of %2$s · %3$s rows', number(data.page || 1), number(data.totalPages || 1), number(data.total || 0));
         els.prev.disabled = (data.page || 1) <= 1;
         els.next.disabled = (data.page || 1) >= (data.totalPages || 1);
     }
@@ -393,11 +443,29 @@
         if (els.start) {
             els.start.disabled = false;
         }
-        setStatus(error.message || 'Something went wrong.');
+        setStatus(error.message || i18n.genericError || 'Something went wrong.');
     }
 
     function number(value) {
         return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
+    function format(template) {
+        const args = Array.prototype.slice.call(arguments, 1);
+        let auto = 0;
+        return String(template)
+            .replace(/%(\d+)\$s/g, function (match, position) {
+                return args[position - 1];
+            })
+            .replace(/%s/g, function () {
+                return args[auto++];
+            });
+    }
+
+    function headRow(labels) {
+        return '<tr>' + labels.map(function (label) {
+            return '<th>' + escapeHtml(label) + '</th>';
+        }).join('') + '</tr>';
     }
 
     function sizeLabel(label) {
@@ -410,7 +478,7 @@
 
     function pathCell(path) {
         return '<div class="si-path"><code>' + escapeHtml(path) + '</code>' +
-            '<button type="button" class="button button-small si-copy" data-copy="' + escapeAttr(path) + '">Copy</button></div>';
+            '<button type="button" class="button button-small si-copy" data-copy="' + escapeAttr(path) + '">' + escapeHtml(i18n.copy || 'Copy') + '</button></div>';
     }
 
     function bindCopyButtons(scope) {
@@ -418,7 +486,7 @@
             button.addEventListener('click', function () {
                 copyText(button.dataset.copy || '').then(function () {
                     const previous = button.textContent;
-                    button.textContent = 'Copied';
+                    button.textContent = i18n.copied || 'Copied';
                     window.setTimeout(function () {
                         button.textContent = previous;
                     }, 1200);

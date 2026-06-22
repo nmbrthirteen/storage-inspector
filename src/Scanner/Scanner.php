@@ -9,6 +9,8 @@ final class Scanner {
 	public const CRON_HOOK        = 'storage_inspector_cron_scan';
 	public const LOCK_KEY         = 'storage_inspector_scan_lock';
 	public const LARGE_FILE_BYTES = 52428800;
+	public const BIG_FILE_BYTES   = 2097152;
+	public const BIG_MEDIA_BYTES  = 1048576;
 
 	private const BATCH_DIRS = 80;
 
@@ -61,7 +63,6 @@ final class Scanner {
 			$root       = (string) $state['root'];
 			$classifier = new Classifier();
 			$groups     = $this->store->groups();
-			$folders    = $this->store->folders();
 			$files      = $this->store->files();
 			$errors     = $this->store->errors();
 			$processed  = 0;
@@ -113,13 +114,14 @@ final class Scanner {
 
 					$group = $classifier->classify( $path, $root, $size );
 					$this->add_group( $groups, $group, $size, 1, 0 );
-					$this->add_folder_usage( $folders, $path, $size, $root );
 
 					$relative = Path::relative( $path, $root );
 					$wp_relative = Path::inside( $path, Path::normalize( ABSPATH ) )
 						? Path::relative( $path, Path::normalize( ABSPATH ) )
 						: $relative;
-					if ( $this->is_cleanup_candidate_file( $relative, $size ) || $this->is_cleanup_candidate_file( $wp_relative, $size ) ) {
+					if ( $this->is_large_file( $relative, $size )
+						|| $this->is_cleanup_candidate_file( $relative, $size )
+						|| $this->is_cleanup_candidate_file( $wp_relative, $size ) ) {
 						$files[ $relative ] = $this->row( $relative, 'file', $size, $group, $this->cleanup->can_delete( $path, $root ) );
 					}
 				}
@@ -134,7 +136,6 @@ final class Scanner {
 
 			$this->store->save_state( $state );
 			$this->store->save_groups( $groups );
-			$this->store->save_folders( $folders );
 			$this->store->save_files( $files );
 			$this->store->save_errors( $errors );
 
@@ -147,15 +148,14 @@ final class Scanner {
 	public function rows( string $kind, int $page, int $per_page ): array {
 		$page     = max( 1, $page );
 		$per_page = min( 200, max( 10, $per_page ) );
-		$rows     = [];
 
-		if ( $kind === 'groups' ) {
-			$rows = array_values( $this->store->groups() );
-		} elseif ( $kind === 'errors' ) {
-			$rows = array_values( $this->store->errors() );
-		} else {
-			$rows = array_values( $this->report_items() );
+		if ( $kind === 'items' ) {
+			return $this->item_rows( $page, $per_page );
 		}
+
+		$rows = $kind === 'errors'
+			? array_values( $this->store->errors() )
+			: array_values( $this->store->groups() );
 
 		usort(
 			$rows,
@@ -169,6 +169,70 @@ final class Scanner {
 
 		return [
 			'rows'      => array_values( array_map( [ $this, 'format_row' ], $rows ) ),
+			'total'     => $total,
+			'page'      => $page,
+			'perPage'   => $per_page,
+			'totalPages'=> (int) ceil( $total / $per_page ),
+		];
+	}
+
+	private function item_rows( int $page, int $per_page ): array {
+		$folders = [];
+
+		foreach ( $this->store->files() as $relative => $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+
+			$relative = str_replace( '\\', '/', (string) $relative );
+			$parent   = trim( str_replace( '\\', '/', dirname( $relative ) ), '/' );
+			if ( $parent === '.' ) {
+				$parent = '';
+			}
+
+			if ( ! isset( $folders[ $parent ] ) ) {
+				$folders[ $parent ] = [
+					'path'     => $parent === '' ? __( 'Site root', 'storage-inspector' ) : $parent,
+					'type'     => 'folder',
+					'bytes'    => 0,
+					'files'    => 0,
+					'children' => [],
+				];
+			}
+
+			$folders[ $parent ]['children'][] = $this->format_row( $row );
+			$folders[ $parent ]['bytes']     += (int) ( $row['bytes'] ?? 0 );
+			$folders[ $parent ]['files']++;
+		}
+
+		foreach ( $folders as &$folder ) {
+			usort(
+				$folder['children'],
+				static function ( array $a, array $b ): int {
+					return ( (int) ( $b['bytes'] ?? 0 ) ) <=> ( (int) ( $a['bytes'] ?? 0 ) );
+				}
+			);
+		}
+		unset( $folder );
+
+		$rows = array_values( $folders );
+		usort(
+			$rows,
+			static function ( array $a, array $b ): int {
+				return ( (int) ( $b['bytes'] ?? 0 ) ) <=> ( (int) ( $a['bytes'] ?? 0 ) );
+			}
+		);
+
+		$total = count( $rows );
+		$rows  = array_slice( $rows, ( $page - 1 ) * $per_page, $per_page );
+
+		foreach ( $rows as &$folder ) {
+			$folder['bytesHuman'] = size_format( (int) $folder['bytes'], 2 );
+		}
+		unset( $folder );
+
+		return [
+			'rows'      => $rows,
 			'total'     => $total,
 			'page'      => $page,
 			'perPage'   => $per_page,
@@ -246,55 +310,6 @@ final class Scanner {
 		$groups[ $key ]['dirs']  += $dirs;
 	}
 
-	private function add_folder_usage( array &$folders, string $file_path, int $bytes, string $root ): void {
-		$dir = dirname( Path::normalize( $file_path ) );
-
-		while ( Path::inside( $dir, $root ) ) {
-			$relative = Path::relative( $dir, $root );
-			if ( $relative === '' ) {
-				break;
-			}
-
-			if ( ! isset( $folders[ $relative ] ) ) {
-				$folders[ $relative ] = [
-					'path'  => $relative,
-					'type'  => 'folder',
-					'bytes' => 0,
-					'files' => 0,
-				];
-			}
-
-			$folders[ $relative ]['bytes'] += $bytes;
-			$folders[ $relative ]['files']++;
-
-			$parent = dirname( $dir );
-			if ( $parent === $dir ) {
-				break;
-			}
-			$dir = $parent;
-		}
-	}
-
-	private function report_items(): array {
-		$state      = $this->store->state();
-		$root       = Path::normalize( (string) ( $state['root'] ?? $this->scan_root() ) );
-		$classifier = new Classifier();
-		$items      = $this->store->files();
-
-		foreach ( $this->store->folders() as $folder ) {
-			$path = (string) ( $folder['path'] ?? '' );
-			if ( $path === '' ) {
-				continue;
-			}
-
-			$absolute = Path::normalize( $root . DIRECTORY_SEPARATOR . $path );
-			$group    = $classifier->classify( $absolute, $root, (int) $folder['bytes'] );
-			$items[ $path ] = $this->row( $path, 'folder', (int) $folder['bytes'], $group, $this->cleanup->can_delete( $absolute, $root ), (int) $folder['files'] );
-		}
-
-		return $items;
-	}
-
 	private function row( string $path, string $type, int $bytes, array $group, bool $deletable, int $files = 0 ): array {
 		return [
 			'path'      => $path,
@@ -318,6 +333,15 @@ final class Scanner {
 		if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
 			wp_schedule_single_event( time() + 10, self::CRON_HOOK );
 		}
+	}
+
+	private function is_large_file( string $relative, int $size ): bool {
+		$threshold = $this->is_media_file( $relative ) ? self::BIG_MEDIA_BYTES : self::BIG_FILE_BYTES;
+		return $size >= $threshold;
+	}
+
+	private function is_media_file( string $relative ): bool {
+		return (bool) preg_match( '/\.(jpe?g|png|gif|webp|avif|bmp|tiff?|svg|ico|heic|heif|mp4|m4v|mov|avi|mkv|webm|wmv|flv|mpe?g|mp3|wav|ogg|oga|m4a|aac|flac|wma)$/i', $relative );
 	}
 
 	private function is_cleanup_candidate_file( string $relative, int $size ): bool {

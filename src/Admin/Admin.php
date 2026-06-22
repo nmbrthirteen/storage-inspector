@@ -52,19 +52,7 @@ final class Admin {
 				'nonce'           => wp_create_nonce( self::NONCE ),
 				'pageUrl'         => admin_url( 'tools.php?page=' . self::SLUG ),
 				'isInspectorPage' => $hook === $this->hook,
-				'i18n'            => [
-					'bannerTitle'         => __( 'Storage Inspector scan is running', 'storage-inspector' ),
-					'bannerLink'          => __( 'View progress', 'storage-inspector' ),
-					'dismiss'             => __( 'Dismiss', 'storage-inspector' ),
-					'deleteFile'          => __( 'Delete this file permanently? Media attachments will be removed through WordPress when possible.', 'storage-inspector' ),
-					'deleteFolder'        => __( 'Delete this generated cleanup folder permanently?', 'storage-inspector' ),
-					'loading'             => __( 'Loading scan state...', 'storage-inspector' ),
-					'empty'               => __( 'No scan has been run yet.', 'storage-inspector' ),
-					'noRows'              => __( 'No rows found.', 'storage-inspector' ),
-					'protected'           => __( 'Protected', 'storage-inspector' ),
-					'delete'              => __( 'Delete', 'storage-inspector' ),
-					'pluginFallbackIcon'  => __( 'Plugin', 'storage-inspector' ),
-					],
+				'i18n'            => $this->strings(),
 				]
 			);
 		}
@@ -104,9 +92,9 @@ final class Admin {
 				</table>
 			</div>
 			<div class="si-pager">
-				<button type="button" class="button" id="si-prev"><?php esc_html_e( 'Previous', 'storage-inspector' ); ?></button>
+				<button type="button" class="button" id="si-prev"><?php esc_html_e( 'Previous', 'default' ); ?></button>
 				<span id="si-page"></span>
-				<button type="button" class="button" id="si-next"><?php esc_html_e( 'Next', 'storage-inspector' ); ?></button>
+				<button type="button" class="button" id="si-next"><?php esc_html_e( 'Next', 'default' ); ?></button>
 			</div>
 		</div>
 		<?php
@@ -155,6 +143,63 @@ final class Admin {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_send_json_error( [ 'message' => __( 'Permission denied.', 'storage-inspector' ) ], 403 );
 		}
+	}
+
+	private function strings(): array {
+		return [
+			// Common UI words reuse WordPress core translations (default domain), falling back to English.
+			'delete'       => __( 'Delete', 'default' ),
+			'folder'       => __( 'Folder', 'default' ),
+			'file'         => __( 'File', 'default' ),
+			'files'        => __( 'Files', 'default' ),
+			'folders'      => __( 'Folders', 'default' ),
+			'size'         => __( 'Size', 'default' ),
+			'type'         => __( 'Type', 'default' ),
+			'errors'       => __( 'Errors', 'default' ),
+			'details'      => __( 'Details', 'default' ),
+			'action'       => __( 'Action', 'default' ),
+			'path'         => __( 'Path', 'default' ),
+			'reason'       => __( 'Reason', 'default' ),
+			'message'      => __( 'Message', 'default' ),
+			'area'         => __( 'Area', 'default' ),
+			'previous'     => __( 'Previous', 'default' ),
+			'next'         => __( 'Next', 'default' ),
+			'copy'         => __( 'Copy', 'default' ),
+			'copied'       => __( 'Copied', 'default' ),
+			'active'       => __( 'Active', 'default' ),
+
+			// Plugin-specific copy.
+			'bannerTitle'  => __( 'Storage Inspector scan is running', 'storage-inspector' ),
+			'bannerLink'   => __( 'View progress', 'storage-inspector' ),
+			'dismiss'      => __( 'Dismiss', 'storage-inspector' ),
+			'deleteFile'   => __( 'Delete this file permanently? Media attachments will be removed through WordPress when possible.', 'storage-inspector' ),
+			'deleteFolder' => __( 'Delete this generated cleanup folder permanently?', 'storage-inspector' ),
+			'loading'      => __( 'Loading scan state...', 'storage-inspector' ),
+			'loadingRows'  => __( 'Loading rows...', 'storage-inspector' ),
+			'empty'        => __( 'No scan has been run yet.', 'storage-inspector' ),
+			'noRows'       => __( 'No rows found.', 'storage-inspector' ),
+			'protected'    => __( 'Protected', 'storage-inspector' ),
+			'largeFiles'   => __( 'large files', 'storage-inspector' ),
+			'starting'     => __( 'Starting...', 'storage-inspector' ),
+			'startNewScan' => __( 'Start new scan', 'storage-inspector' ),
+			'startingScan' => __( 'Starting scan...', 'storage-inspector' ),
+			'startingNew'  => __( 'Starting new scan...', 'storage-inspector' ),
+			'copyPath'     => __( 'Copy path', 'storage-inspector' ),
+			'scannedRoot'  => __( 'Scanned root', 'storage-inspector' ),
+			'pluginUri'    => __( 'Plugin URI', 'storage-inspector' ),
+			'totalStorage' => __( 'Total storage', 'storage-inspector' ),
+			'folderFile'   => __( 'Folder / file', 'storage-inspector' ),
+			'genericError' => __( 'Something went wrong.', 'storage-inspector' ),
+			'requestError' => __( 'Request failed.', 'storage-inspector' ),
+			/* translators: %1$s folders checked, %2$s folders queued, %3$s files found. */
+			'scanning'     => __( 'Scanning... %1$s folders checked, %2$s queued, %3$s files found.', 'storage-inspector' ),
+			/* translators: %1$s files, %2$s folders, %3$s human-readable size. */
+			'complete'     => __( 'Scan complete. %1$s files across %2$s folders, using %3$s.', 'storage-inspector' ),
+			/* translators: %1$s current page, %2$s total pages, %3$s total rows. */
+			'pager'        => __( 'Page %1$s of %2$s · %3$s rows', 'storage-inspector' ),
+			/* translators: %s expected scan root path. */
+			'staleRoot'    => __( 'These results were scanned from an old root. Start a new scan to use %s.', 'storage-inspector' ),
+		];
 	}
 
 	private function asset_version( string $relative ): string {
