@@ -64,11 +64,10 @@ final class Admin {
 					'protected'           => __( 'Protected', 'storage-inspector' ),
 					'delete'              => __( 'Delete', 'storage-inspector' ),
 					'pluginFallbackIcon'  => __( 'Plugin', 'storage-inspector' ),
-					'exactFileBytes'      => __( 'Exact file bytes. Hosting disk allocation can differ.', 'storage-inspector' ),
-				],
-			]
-		);
-	}
+					],
+				]
+			);
+		}
 
 	public function render(): void {
 		if ( ! current_user_can( 'manage_options' ) ) {

@@ -242,7 +242,7 @@
 
     function renderSummary(data) {
         els.summary.innerHTML = [
-            summaryCard('Total storage', exactSize(data.bytesHuman || '0 B', data.bytes || 0)),
+            summaryCard('Total storage', sizeLabel(data.bytesHuman || '0 B')),
             summaryCard('Files', number(data.files || 0)),
             summaryCard('Folders', number(data.dirs || 0)),
             summaryCard('Errors', number(data.errors || 0)),
@@ -329,7 +329,7 @@
 
         return '<tr>' +
             '<td><div class="si-area">' + iconMarkup + '<div><strong>' + escapeHtml(row.label || '') + '</strong><div class="si-muted">' + escapeHtml(row.type || '') + '</div></div></div></td>' +
-            '<td>' + exactSize(row.bytesHuman || '0 B', row.bytes || 0) + '</td>' +
+            '<td>' + sizeLabel(row.bytesHuman || '0 B') + '</td>' +
             '<td>' + number(row.files || 0) + '</td>' +
             '<td>' + number(row.dirs || 0) + '</td>' +
             '<td>' + escapeHtml(row.reason || '') + (meta ? '<div class="si-muted">' + escapeHtml(meta) + '</div>' : '') + (details.uri ? '<div><a href="' + escapeAttr(details.uri) + '" target="_blank" rel="noreferrer">Plugin URI</a></div>' : '') + '</td>' +
@@ -344,7 +344,7 @@
         return '<tr>' +
             '<td>' + pathCell(item.path || '') + '<div class="si-muted">' + escapeHtml(item.area || '') + '</div></td>' +
             '<td>' + escapeHtml(item.type || '') + '</td>' +
-            '<td>' + exactSize(item.bytesHuman || '0 B', item.bytes || 0) + '</td>' +
+            '<td>' + sizeLabel(item.bytesHuman || '0 B') + '</td>' +
             '<td>' + escapeHtml(item.reason || '') + '</td>' +
             '<td>' + action + '</td>' +
         '</tr>';
@@ -400,8 +400,8 @@
         return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     }
 
-    function exactSize(label, bytes) {
-        return '<span>' + escapeHtml(label) + '</span><div class="si-muted" title="' + escapeAttr(i18n.exactFileBytes || '') + '">' + number(bytes) + ' bytes</div>';
+    function sizeLabel(label) {
+        return '<span>' + escapeHtml(label) + '</span>';
     }
 
     function fallbackIcon(icon) {
