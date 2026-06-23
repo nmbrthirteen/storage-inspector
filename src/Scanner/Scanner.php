@@ -161,6 +161,11 @@ final class Scanner {
 				$state['finished_at'] = time();
 			}
 
+			if ( ( $this->store->fresh_state()['status'] ?? '' ) === 'stopped' ) {
+				$state['status']      = 'stopped';
+				$state['finished_at'] = $state['finished_at'] ?: time();
+			}
+
 			$this->store->save_state( $state );
 			$this->store->save_groups( $groups );
 			$this->store->save_files( $files );
@@ -328,6 +333,19 @@ final class Scanner {
 		if ( $state['status'] === 'running' ) {
 			$this->ensure_scheduled( self::FALLBACK_DELAY );
 		}
+	}
+
+	public function stop(): array {
+		$this->cancel();
+
+		$state = $this->store->state();
+		if ( ( $state['status'] ?? '' ) === 'running' ) {
+			$state['status']      = 'stopped';
+			$state['finished_at'] = time();
+			$this->store->save_state( $state );
+		}
+
+		return $this->public_state( $state );
 	}
 
 	public function cancel(): void {

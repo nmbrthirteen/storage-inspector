@@ -14,6 +14,12 @@
     margin-bottom: 4px;
 }
 
+.si-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 8px;
+}
+
 .si-header p {
     color: #646970;
     margin: 0;

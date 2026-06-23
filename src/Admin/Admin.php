@@ -21,6 +21,7 @@ final class Admin {
 		add_action( 'admin_enqueue_scripts', [ $this, 'assets' ] );
 		add_action( 'wp_ajax_' . self::AJAX_PREFIX . 'start', [ $this, 'ajax_start' ] );
 		add_action( 'wp_ajax_' . self::AJAX_PREFIX . 'scan', [ $this, 'ajax_scan' ] );
+		add_action( 'wp_ajax_' . self::AJAX_PREFIX . 'stop', [ $this, 'ajax_stop' ] );
 		add_action( 'wp_ajax_' . self::AJAX_PREFIX . 'state', [ $this, 'ajax_state' ] );
 		add_action( 'wp_ajax_' . self::AJAX_PREFIX . 'rows', [ $this, 'ajax_rows' ] );
 		add_action( 'wp_ajax_' . self::AJAX_PREFIX . 'delete', [ $this, 'ajax_delete' ] );
@@ -67,7 +68,10 @@ final class Admin {
 					<div>
 						<h1><?php esc_html_e( 'Storage Inspector', 'storage-inspector' ); ?></h1>
 					</div>
-					<button type="button" class="button button-primary" id="si-start"><?php esc_html_e( 'Start new scan', 'storage-inspector' ); ?></button>
+					<div class="si-actions">
+						<button type="button" class="button" id="si-stop" hidden><?php esc_html_e( 'Cancel scan', 'storage-inspector' ); ?></button>
+						<button type="button" class="button button-primary" id="si-start"><?php esc_html_e( 'Start new scan', 'storage-inspector' ); ?></button>
+					</div>
 				</div>
 
 			<div class="si-progress" aria-live="polite">
@@ -108,6 +112,11 @@ final class Admin {
 	public function ajax_scan(): void {
 		$this->guard();
 		wp_send_json_success( $this->scanner->process_batch( true ) );
+	}
+
+	public function ajax_stop(): void {
+		$this->guard();
+		wp_send_json_success( $this->scanner->stop() );
 	}
 
 	public function ajax_state(): void {
@@ -182,6 +191,10 @@ final class Admin {
 			'largeFiles'   => __( 'large files', 'storage-inspector' ),
 			'starting'     => __( 'Starting...', 'storage-inspector' ),
 			'startNewScan' => __( 'Start new scan', 'storage-inspector' ),
+			'stopScan'     => __( 'Cancel scan', 'storage-inspector' ),
+			'stopping'     => __( 'Cancelling...', 'storage-inspector' ),
+			/* translators: %1$s files, %2$s folders, %3$s human-readable size. */
+			'stopped'      => __( 'Scan cancelled. %1$s files across %2$s folders, using %3$s so far.', 'storage-inspector' ),
 			'startingScan' => __( 'Starting scan...', 'storage-inspector' ),
 			'startingNew'  => __( 'Starting new scan...', 'storage-inspector' ),
 			'copyPath'     => __( 'Copy path', 'storage-inspector' ),

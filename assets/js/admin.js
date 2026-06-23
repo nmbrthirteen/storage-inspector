@@ -14,6 +14,7 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         els.start = document.getElementById('si-start');
+        els.stop = document.getElementById('si-stop');
         els.status = document.getElementById('si-status');
         els.fill = document.getElementById('si-progress-fill');
         els.summary = document.getElementById('si-summary');
@@ -27,6 +28,10 @@
 
         if (els.start) {
             els.start.addEventListener('click', startScan);
+        }
+
+        if (els.stop) {
+            els.stop.addEventListener('click', stopScan);
         }
 
         document.querySelectorAll('.si-tab').forEach(function (button) {
@@ -104,6 +109,28 @@
         }).catch(showError);
     }
 
+    function stopScan() {
+        state.scanning = false;
+        if (els.stop) {
+            els.stop.disabled = true;
+            els.stop.textContent = i18n.stopping || 'Cancelling...';
+        }
+        request('stop').then(function (data) {
+            renderState(data);
+            fetchRows();
+            if (els.start) {
+                els.start.disabled = false;
+                els.start.textContent = i18n.startNewScan || 'Start new scan';
+            }
+        }).catch(function (error) {
+            if (els.stop) {
+                els.stop.disabled = false;
+                els.stop.textContent = i18n.stopScan || 'Cancel scan';
+            }
+            showError(error);
+        });
+    }
+
     function fetchState() {
         request('state').then(function (data) {
             renderState(data);
@@ -125,6 +152,9 @@
 
     function scanBatch() {
         request('scan').then(function (data) {
+            if (!state.scanning) {
+                return;
+            }
             renderState(data);
             fetchRowsThrottled(data.status !== 'running');
             if (data.status === 'running') {
@@ -182,8 +212,16 @@
             return;
         }
 
+        const running = data.status === 'running';
         if (els.start) {
-            els.start.disabled = data.status === 'running';
+            els.start.disabled = running;
+        }
+        if (els.stop) {
+            els.stop.hidden = !running;
+            if (running) {
+                els.stop.disabled = false;
+                els.stop.textContent = i18n.stopScan || 'Cancel scan';
+            }
         }
         if (els.fill) {
             els.fill.style.width = (data.progress || 0) + '%';
@@ -191,8 +229,10 @@
 
         if (data.status === 'empty') {
             setStatus(i18n.empty || 'No scan has been run yet.');
-        } else if (data.status === 'running') {
+        } else if (running) {
             setStatus(format(i18n.scanning || 'Scanning... %1$s folders checked, %2$s queued, %3$s files found.', number(data.dirs || 0), number(data.queued || 0), number(data.files || 0)));
+        } else if (data.status === 'stopped') {
+            setStatus(format(i18n.stopped || 'Scan cancelled. %1$s files across %2$s folders, using %3$s so far.', number(data.files || 0), number(data.dirs || 0), data.bytesHuman || '0 B'));
         } else {
             setStatus(format(i18n.complete || 'Scan complete. %1$s files across %2$s folders, using %3$s.', number(data.files || 0), number(data.dirs || 0), data.bytesHuman || '0 B'));
         }

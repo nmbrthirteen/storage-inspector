@@ -3,7 +3,7 @@
  * Plugin Name: Storage Inspector
  * Plugin URI:  https://github.com/nmbrthirteen/storage-inspector
  * Description: Inspect WordPress storage usage by plugins, media, themes, cache, backups, logs, and generated files.
- * Version:     0.3.0
+ * Version:     0.3.1
  * Author:      Nika Siradze
  * Author URI:  https://nikusha.com
  * Text Domain: storage-inspector
@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-defined( 'STORAGE_INSPECTOR_VERSION' ) || define( 'STORAGE_INSPECTOR_VERSION', '0.3.0' );
+defined( 'STORAGE_INSPECTOR_VERSION' ) || define( 'STORAGE_INSPECTOR_VERSION', '0.3.1' );
 defined( 'STORAGE_INSPECTOR_FILE' ) || define( 'STORAGE_INSPECTOR_FILE', __FILE__ );
 defined( 'STORAGE_INSPECTOR_PATH' ) || define( 'STORAGE_INSPECTOR_PATH', plugin_dir_path( __FILE__ ) );
 defined( 'STORAGE_INSPECTOR_URL' ) || define( 'STORAGE_INSPECTOR_URL', plugin_dir_url( __FILE__ ) );

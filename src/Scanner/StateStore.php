@@ -38,6 +38,11 @@ final class StateStore {
 		return is_array( $state ) ? $state : [ 'status' => 'empty' ];
 	}
 
+	public function fresh_state(): array {
+		wp_cache_delete( self::STATE_OPTION, 'options' );
+		return $this->state();
+	}
+
 	public function save_state( array $state ): void {
 		update_option( self::STATE_OPTION, $state, false );
 	}
