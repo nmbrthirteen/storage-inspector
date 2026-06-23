@@ -8,11 +8,15 @@ final class Scanner {
 
 	public const CRON_HOOK        = 'storage_inspector_cron_scan';
 	public const LOCK_KEY         = 'storage_inspector_scan_lock';
+	public const HUGE_FILE_BYTES  = 1073741824;
 	public const LARGE_FILE_BYTES = 52428800;
 	public const BIG_FILE_BYTES   = 2097152;
 	public const BIG_MEDIA_BYTES  = 1048576;
 
-	private const BATCH_DIRS = 80;
+	private const BATCH_DIRS         = 80;
+	private const WORKER_MAX_SECONDS = 15;
+	private const WORKER_RETRY_DELAY = 2;
+	private const FALLBACK_DELAY     = 15;
 
 	private StateStore $store;
 	private CleanupPolicy $cleanup;
@@ -29,7 +33,7 @@ final class Scanner {
 	public function start(): array {
 		$this->cancel();
 		$state = $this->store->reset( $this->scan_root() );
-		$this->schedule();
+		$this->ensure_scheduled( self::WORKER_RETRY_DELAY );
 		return $this->public_state( $state );
 	}
 
@@ -42,10 +46,34 @@ final class Scanner {
 	}
 
 	public function cron_scan(): void {
-		$this->process_batch();
+		if ( get_transient( self::LOCK_KEY ) ) {
+			$this->ensure_scheduled( self::FALLBACK_DELAY );
+			return;
+		}
+
+		$deadline = time() + self::WORKER_MAX_SECONDS;
+		$worked   = false;
+		$last_sig = '';
+
+		do {
+			$state = $this->process_batch();
+			if ( ( $state['status'] ?? '' ) !== 'running' ) {
+				return;
+			}
+
+			$sig = $state['dirs'] . ':' . $state['files'] . ':' . $state['queued'];
+			if ( $sig === $last_sig ) {
+				break;
+			}
+
+			$last_sig = $sig;
+			$worked   = true;
+		} while ( time() < $deadline && ! $this->approaching_memory_limit() );
+
+		$this->ensure_scheduled( $worked ? self::WORKER_RETRY_DELAY : self::FALLBACK_DELAY );
 	}
 
-	public function process_batch(): array {
+	public function process_batch( bool $ensure_fallback = false ): array {
 		if ( get_transient( self::LOCK_KEY ) ) {
 			return $this->state();
 		}
@@ -122,7 +150,8 @@ final class Scanner {
 					if ( $this->is_large_file( $relative, $size )
 						|| $this->is_cleanup_candidate_file( $relative, $size )
 						|| $this->is_cleanup_candidate_file( $wp_relative, $size ) ) {
-						$files[ $relative ] = $this->row( $relative, 'file', $size, $group, $this->cleanup->can_delete( $path, $root ) );
+						$reason             = $this->cleanup_reason( $relative, $wp_relative, $size, $group );
+						$files[ $relative ] = $this->row( $relative, 'file', $size, $group, $this->cleanup->can_delete( $path, $root ), $reason );
 					}
 				}
 			}
@@ -130,14 +159,16 @@ final class Scanner {
 			if ( empty( $state['queue'] ) ) {
 				$state['status']      = 'complete';
 				$state['finished_at'] = time();
-			} else {
-				$this->schedule();
 			}
 
 			$this->store->save_state( $state );
 			$this->store->save_groups( $groups );
 			$this->store->save_files( $files );
 			$this->store->save_errors( $errors );
+
+			if ( $ensure_fallback && ( $state['status'] ?? '' ) === 'running' ) {
+				$this->ensure_scheduled( self::FALLBACK_DELAY );
+			}
 
 			return $this->public_state( $state );
 		} finally {
@@ -259,8 +290,44 @@ final class Scanner {
 			return new \WP_Error( 'storage_inspector_delete_failed', __( 'Delete failed. Check filesystem permissions.', 'storage-inspector' ), [ 'status' => 500 ] );
 		}
 
-		$this->store->clear();
+		$this->forget_path( ltrim( str_replace( '\\', '/', $relative ), '/' ) );
 		return true;
+	}
+
+	private function forget_path( string $relative ): void {
+		$files         = $this->store->files();
+		$prefix        = $relative . '/';
+		$removed_files = 0;
+		$removed_bytes = 0;
+
+		foreach ( $files as $key => $row ) {
+			$normalized = ltrim( str_replace( '\\', '/', (string) $key ), '/' );
+			if ( $normalized !== $relative && strncmp( $normalized, $prefix, strlen( $prefix ) ) !== 0 ) {
+				continue;
+			}
+
+			if ( is_array( $row ) ) {
+				$removed_bytes += (int) ( $row['bytes'] ?? 0 );
+				$removed_files++;
+			}
+
+			unset( $files[ $key ] );
+		}
+
+		$this->store->save_files( $files );
+
+		$state = $this->store->state();
+		if ( ! isset( $state['status'] ) || $state['status'] === 'empty' ) {
+			return;
+		}
+
+		$state['files'] = max( 0, (int) ( $state['files'] ?? 0 ) - $removed_files );
+		$state['bytes'] = max( 0, (int) ( $state['bytes'] ?? 0 ) - $removed_bytes );
+		$this->store->save_state( $state );
+
+		if ( $state['status'] === 'running' ) {
+			$this->ensure_scheduled( self::FALLBACK_DELAY );
+		}
 	}
 
 	public function cancel(): void {
@@ -310,18 +377,41 @@ final class Scanner {
 		$groups[ $key ]['dirs']  += $dirs;
 	}
 
-	private function row( string $path, string $type, int $bytes, array $group, bool $deletable, int $files = 0 ): array {
+	private function row( string $path, string $type, int $bytes, array $group, bool $deletable, string $reason = '', int $files = 0 ): array {
+		if ( $reason === '' ) {
+			$reason = $type === 'folder'
+				? sprintf( __( 'Recursive folder total across %s files.', 'storage-inspector' ), number_format_i18n( $files ) )
+				: $group['reason'];
+		}
+
 		return [
 			'path'      => $path,
 			'type'      => $type,
 			'bytes'     => $bytes,
 			'area'      => $group['label'],
 			'areaType'  => $group['type'],
-			'reason'    => $type === 'folder'
-				? sprintf( __( 'Recursive folder total across %s files.', 'storage-inspector' ), number_format_i18n( $files ) )
-				: $group['reason'],
+			'reason'    => $reason,
 			'deletable' => $deletable,
 		];
+	}
+
+	private function cleanup_reason( string $relative, string $wp_relative, int $size, array $group ): string {
+		if ( Classifier::is_backup_path( $relative ) || Classifier::is_backup_path( $wp_relative )
+			|| Classifier::is_log_path( $relative ) || Classifier::is_log_path( $wp_relative ) ) {
+			return (string) $group['reason'];
+		}
+
+		if ( $size >= self::HUGE_FILE_BYTES ) {
+			/* translators: %s human-readable file size. */
+			return sprintf( __( 'Very large file (%s).', 'storage-inspector' ), size_format( $size, 1 ) );
+		}
+
+		if ( $size >= self::LARGE_FILE_BYTES ) {
+			/* translators: %s human-readable file size. */
+			return sprintf( __( 'Large file (%s).', 'storage-inspector' ), size_format( $size, 1 ) );
+		}
+
+		return (string) $group['reason'];
 	}
 
 	private function format_row( array $row ): array {
@@ -329,10 +419,19 @@ final class Scanner {
 		return $row;
 	}
 
-	private function schedule(): void {
+	private function ensure_scheduled( int $delay ): void {
 		if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
-			wp_schedule_single_event( time() + 10, self::CRON_HOOK );
+			wp_schedule_single_event( time() + max( 1, $delay ), self::CRON_HOOK );
 		}
+	}
+
+	private function approaching_memory_limit(): bool {
+		$limit = wp_convert_hr_to_bytes( (string) ini_get( 'memory_limit' ) );
+		if ( $limit <= 0 ) {
+			return false;
+		}
+
+		return memory_get_usage( true ) >= (int) ( $limit * 0.85 );
 	}
 
 	private function is_large_file( string $relative, int $size ): bool {

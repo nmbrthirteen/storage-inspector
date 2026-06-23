@@ -107,7 +107,7 @@ final class Admin {
 
 	public function ajax_scan(): void {
 		$this->guard();
-		wp_send_json_success( $this->scanner->process_batch() );
+		wp_send_json_success( $this->scanner->process_batch( true ) );
 	}
 
 	public function ajax_state(): void {

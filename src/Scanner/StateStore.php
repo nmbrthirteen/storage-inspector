@@ -77,12 +77,4 @@ final class StateStore {
 	public function save_errors( array $errors ): void {
 		update_option( self::ERRORS_OPTION, $errors, false );
 	}
-
-	public function clear(): void {
-		delete_option( self::STATE_OPTION );
-		delete_option( self::GROUPS_OPTION );
-		delete_option( self::FOLDERS_OPTION );
-		delete_option( self::FILES_OPTION );
-		delete_option( self::ERRORS_OPTION );
-	}
 }
