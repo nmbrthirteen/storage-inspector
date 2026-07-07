@@ -12,7 +12,9 @@ final class Scanner {
 	public const LARGE_FILE_BYTES = 52428800;
 	public const BIG_FILE_BYTES   = 2097152;
 	public const BIG_MEDIA_BYTES  = 1048576;
+	public const FOLDER_MAX_DEPTH = 6;
 
+	private const FOLDER_MAX_ROWS    = 10000;
 	private const BATCH_DIRS         = 80;
 	private const WORKER_MAX_SECONDS = 15;
 	private const WORKER_RETRY_DELAY = 2;
@@ -91,6 +93,7 @@ final class Scanner {
 			$root       = (string) $state['root'];
 			$classifier = new Classifier();
 			$groups     = $this->store->groups();
+			$folders    = $this->store->folders();
 			$files      = $this->store->files();
 			$errors     = $this->store->errors();
 			$processed  = 0;
@@ -144,6 +147,7 @@ final class Scanner {
 					$this->add_group( $groups, $group, $size, 1, 0 );
 
 					$relative = Path::relative( $path, $root );
+					$this->add_folder_totals( $folders, $relative, $size );
 					$wp_relative = Path::inside( $path, Path::normalize( ABSPATH ) )
 						? Path::relative( $path, Path::normalize( ABSPATH ) )
 						: $relative;
@@ -168,6 +172,7 @@ final class Scanner {
 
 			$this->store->save_state( $state );
 			$this->store->save_groups( $groups );
+			$this->store->save_folders( $this->prune_folders( $folders ) );
 			$this->store->save_files( $files );
 			$this->store->save_errors( $errors );
 
@@ -181,9 +186,13 @@ final class Scanner {
 		}
 	}
 
-	public function rows( string $kind, int $page, int $per_page ): array {
+	public function rows( string $kind, int $page, int $per_page, string $parent = '' ): array {
 		$page     = max( 1, $page );
 		$per_page = min( 200, max( 10, $per_page ) );
+
+		if ( $kind === 'folders' ) {
+			return $this->folder_rows( $parent, $per_page );
+		}
 
 		if ( $kind === 'items' ) {
 			return $this->item_rows( $page, $per_page );
@@ -274,6 +283,104 @@ final class Scanner {
 			'perPage'   => $per_page,
 			'totalPages'=> (int) ceil( $total / $per_page ),
 		];
+	}
+
+	private function folder_rows( string $parent, int $limit ): array {
+		$parent       = trim( str_replace( '\\', '/', $parent ), '/' );
+		$folders      = $this->store->folders();
+		$parent_depth = $parent === '' ? 0 : count( explode( '/', $parent ) );
+		$child_depth  = $parent_depth + 1;
+		$prefix       = $parent === '' ? '' : $parent . '/';
+
+		$has_children = [];
+		foreach ( array_keys( $folders ) as $path ) {
+			$dir = trim( str_replace( '\\', '/', dirname( (string) $path ) ), '/' );
+			if ( $dir !== '' && $dir !== '.' ) {
+				$has_children[ $dir ] = true;
+			}
+		}
+
+		$rows = [];
+		foreach ( $folders as $path => $row ) {
+			$path     = trim( str_replace( '\\', '/', (string) $path ), '/' );
+			$segments = explode( '/', $path );
+			if ( count( $segments ) !== $child_depth ) {
+				continue;
+			}
+			if ( $prefix !== '' && strncmp( $path, $prefix, strlen( $prefix ) ) !== 0 ) {
+				continue;
+			}
+
+			$bytes  = (int) ( $row['bytes'] ?? 0 );
+			$rows[] = [
+				'path'       => $path,
+				'name'       => $segments[ count( $segments ) - 1 ],
+				'depth'      => $child_depth,
+				'bytes'      => $bytes,
+				'bytesHuman' => size_format( $bytes, 2 ),
+				'files'      => (int) ( $row['files'] ?? 0 ),
+				'expandable' => $child_depth < self::FOLDER_MAX_DEPTH && isset( $has_children[ $path ] ),
+			];
+		}
+
+		usort(
+			$rows,
+			static function ( array $a, array $b ): int {
+				return $b['bytes'] <=> $a['bytes'];
+			}
+		);
+
+		$total = count( $rows );
+		$rows  = array_slice( $rows, 0, $limit );
+
+		return [
+			'rows'      => $rows,
+			'parent'    => $parent,
+			'total'     => $total,
+			'shown'     => count( $rows ),
+			'truncated' => max( 0, $total - count( $rows ) ),
+		];
+	}
+
+	private function add_folder_totals( array &$folders, string $relative, int $size ): void {
+		$parts = explode( '/', str_replace( '\\', '/', $relative ) );
+		array_pop( $parts );
+
+		$prefix = '';
+		$depth  = 0;
+		foreach ( $parts as $part ) {
+			if ( $part === '' ) {
+				continue;
+			}
+
+			$depth++;
+			if ( $depth > self::FOLDER_MAX_DEPTH ) {
+				break;
+			}
+
+			$prefix = $prefix === '' ? $part : $prefix . '/' . $part;
+			if ( ! isset( $folders[ $prefix ] ) ) {
+				$folders[ $prefix ] = [ 'bytes' => 0, 'files' => 0 ];
+			}
+
+			$folders[ $prefix ]['bytes'] += $size;
+			$folders[ $prefix ]['files']++;
+		}
+	}
+
+	private function prune_folders( array $folders ): array {
+		if ( count( $folders ) <= self::FOLDER_MAX_ROWS ) {
+			return $folders;
+		}
+
+		uasort(
+			$folders,
+			static function ( array $a, array $b ): int {
+				return ( (int) $b['bytes'] ) <=> ( (int) $a['bytes'] );
+			}
+		);
+
+		return array_slice( $folders, 0, self::FOLDER_MAX_ROWS, true );
 	}
 
 	public function delete( string $relative ): bool|\WP_Error {

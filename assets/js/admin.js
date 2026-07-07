@@ -192,8 +192,12 @@
             perPage: state.perPage,
         }).then(function (data) {
             state.totalPages = Math.max(1, data.totalPages || 1);
-            renderRows(data.rows || []);
-            renderPager(data);
+            if (state.kind === 'folders') {
+                renderFolderRows(data.rows || [], data);
+            } else {
+                renderRows(data.rows || []);
+                renderPager(data);
+            }
         }).catch(showError);
     }
 
@@ -325,6 +329,8 @@
             els.head.innerHTML = headRow([i18n.area || 'Area', i18n.size || 'Size', i18n.files || 'Files', i18n.folders || 'Folders', i18n.details || 'Details']);
         } else if (state.kind === 'errors') {
             els.head.innerHTML = headRow([i18n.path || 'Path', i18n.message || 'Message']);
+        } else if (state.kind === 'folders') {
+            els.head.innerHTML = headRow([i18n.folderFile || 'Folder', i18n.size || 'Size', i18n.files || 'Files']);
         } else {
             els.head.innerHTML = headRow([i18n.folderFile || 'Folder / file', i18n.type || 'Type', i18n.size || 'Size', i18n.reason || 'Reason', i18n.action || 'Action']);
         }
@@ -335,14 +341,22 @@
             return;
         }
 
-        const colspan = state.kind === 'errors' ? 2 : 5;
-        els.body.innerHTML = '<tr><td colspan="' + colspan + '"><span class="spinner is-active si-spinner"></span>' + escapeHtml(message) + '</td></tr>';
+        els.body.innerHTML = '<tr><td colspan="' + columnCount() + '"><span class="spinner is-active si-spinner"></span>' + escapeHtml(message) + '</td></tr>';
+    }
+
+    function columnCount() {
+        if (state.kind === 'errors') {
+            return 2;
+        }
+        if (state.kind === 'folders') {
+            return 3;
+        }
+        return 5;
     }
 
     function renderRows(rows) {
         if (!rows.length) {
-            const colspan = state.kind === 'errors' ? 2 : 5;
-            els.body.innerHTML = '<tr><td colspan="' + colspan + '">' + escapeHtml(i18n.noRows || 'No rows found.') + '</td></tr>';
+            els.body.innerHTML = '<tr><td colspan="' + columnCount() + '">' + escapeHtml(i18n.noRows || 'No rows found.') + '</td></tr>';
             return;
         }
 
@@ -361,6 +375,108 @@
         }
 
         bindCopyButtons(els.body);
+    }
+
+    function renderFolderRows(rows, data) {
+        if (!rows.length) {
+            els.body.innerHTML = '<tr><td colspan="3">' + escapeHtml(i18n.noRows || 'No rows found.') + '</td></tr>';
+            renderFolderNote(null);
+            return;
+        }
+
+        els.body.innerHTML = rows.map(folderTreeRow).join('');
+        bindFolderTree(els.body);
+        renderFolderNote(data);
+    }
+
+    function folderTreeRow(row) {
+        const depth = row.depth || 1;
+        const pad = 8 + (depth - 1) * 20;
+        const toggle = row.expandable
+            ? '<button type="button" class="si-toggle" aria-expanded="false" data-path="' + escapeAttr(row.path) + '" data-depth="' + depth + '"><span class="si-toggle-icon" aria-hidden="true">▸</span></button>'
+            : '<span class="si-toggle-spacer" aria-hidden="true"></span>';
+
+        return '<tr class="si-tree-row" data-path="' + escapeAttr(row.path) + '" data-depth="' + depth + '">' +
+            '<td><div class="si-tree-cell" style="padding-left:' + pad + 'px">' + toggle +
+            '<code>' + escapeHtml(row.name || row.path) + '</code>' +
+            '<button type="button" class="button button-small si-copy" data-copy="' + escapeAttr(row.path) + '">' + escapeHtml(i18n.copy || 'Copy') + '</button></div></td>' +
+            '<td>' + sizeLabel(row.bytesHuman || '0 B') + '</td>' +
+            '<td>' + number(row.files || 0) + '</td>' +
+        '</tr>';
+    }
+
+    function bindFolderTree(scope) {
+        scope.querySelectorAll('.si-tree-row .si-toggle').forEach(function (button) {
+            if (button.dataset.bound === '1') {
+                return;
+            }
+            button.dataset.bound = '1';
+            button.addEventListener('click', toggleFolder);
+        });
+        bindCopyButtons(scope);
+    }
+
+    function toggleFolder(event) {
+        const button = event.currentTarget;
+        const row = button.closest('tr');
+        const path = button.dataset.path || '';
+        const expanded = button.getAttribute('aria-expanded') === 'true';
+
+        if (expanded) {
+            button.setAttribute('aria-expanded', 'false');
+            button.classList.remove('is-open');
+            collapseFolder(row);
+            return;
+        }
+
+        button.setAttribute('aria-expanded', 'true');
+        button.classList.add('is-open', 'is-loading');
+        request('rows', { kind: 'folders', parent: path, perPage: state.perPage }).then(function (data) {
+            button.classList.remove('is-loading');
+            insertChildRows(row, data.rows || []);
+        }).catch(function (error) {
+            button.classList.remove('is-loading', 'is-open');
+            button.setAttribute('aria-expanded', 'false');
+            showError(error);
+        });
+    }
+
+    function insertChildRows(afterRow, rows) {
+        let anchor = afterRow;
+        rows.forEach(function (row) {
+            const holder = document.createElement('tbody');
+            holder.innerHTML = folderTreeRow(row);
+            const tr = holder.firstElementChild;
+            anchor.insertAdjacentElement('afterend', tr);
+            anchor = tr;
+            const toggle = tr.querySelector('.si-toggle');
+            if (toggle) {
+                toggle.dataset.bound = '1';
+                toggle.addEventListener('click', toggleFolder);
+            }
+            bindCopyButtons(tr);
+        });
+    }
+
+    function collapseFolder(row) {
+        const depth = parseInt(row.dataset.depth || '1', 10);
+        let next = row.nextElementSibling;
+        while (next && parseInt(next.dataset.depth || '0', 10) > depth) {
+            const remove = next;
+            next = next.nextElementSibling;
+            remove.remove();
+        }
+    }
+
+    function renderFolderNote(data) {
+        if (!els.page) {
+            return;
+        }
+        els.prev.disabled = true;
+        els.next.disabled = true;
+        els.page.textContent = data && data.truncated > 0
+            ? format(i18n.moreFolders || 'Showing the %1$s largest of %2$s folders.', number(data.shown || 0), number(data.total || 0))
+            : (i18n.folderHint || '');
     }
 
     function groupRow(row) {

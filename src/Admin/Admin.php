@@ -85,6 +85,7 @@ final class Admin {
 
 			<nav class="nav-tab-wrapper si-tabs" aria-label="<?php esc_attr_e( 'Storage Inspector views', 'storage-inspector' ); ?>">
 				<a href="#" class="nav-tab nav-tab-active si-tab" data-kind="groups"><?php esc_html_e( 'Areas', 'storage-inspector' ); ?></a>
+				<a href="#" class="nav-tab si-tab" data-kind="folders"><?php esc_html_e( 'Largest folders', 'storage-inspector' ); ?></a>
 				<a href="#" class="nav-tab si-tab" data-kind="items"><?php esc_html_e( 'Folders & cleanup', 'storage-inspector' ); ?></a>
 				<a href="#" class="nav-tab si-tab" data-kind="errors"><?php esc_html_e( 'Scan errors', 'storage-inspector' ); ?></a>
 			</nav>
@@ -130,8 +131,9 @@ final class Admin {
 		$kind     = sanitize_key( wp_unslash( $_POST['kind'] ?? 'groups' ) );
 		$page     = max( 1, (int) ( $_POST['page'] ?? 1 ) );
 		$per_page = max( 10, (int) ( $_POST['perPage'] ?? 50 ) );
+		$parent   = sanitize_text_field( wp_unslash( $_POST['parent'] ?? '' ) );
 
-		wp_send_json_success( $this->scanner->rows( $kind, $page, $per_page ) );
+		wp_send_json_success( $this->scanner->rows( $kind, $page, $per_page, $parent ) );
 	}
 
 	public function ajax_delete(): void {
@@ -189,6 +191,11 @@ final class Admin {
 			'noRows'       => __( 'No rows found.', 'storage-inspector' ),
 			'protected'    => __( 'Protected', 'storage-inspector' ),
 			'largeFiles'   => __( 'large files', 'storage-inspector' ),
+			/* translators: %s number of files. */
+			'filesCount'   => __( '%s files', 'storage-inspector' ),
+			/* translators: %1$s folders shown, %2$s total folders. */
+			'moreFolders'  => __( 'Showing the %1$s largest of %2$s folders.', 'storage-inspector' ),
+			'folderHint'   => __( 'Recursive size of every folder. Expand a row to drill into subfolders.', 'storage-inspector' ),
 			'starting'     => __( 'Starting...', 'storage-inspector' ),
 			'startNewScan' => __( 'Start new scan', 'storage-inspector' ),
 			'stopScan'     => __( 'Cancel scan', 'storage-inspector' ),

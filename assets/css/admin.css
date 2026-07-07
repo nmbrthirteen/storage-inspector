@@ -193,6 +193,28 @@
     color: #1d2327;
 }
 
+.si-tree-cell {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+}
+
+.si-tree-cell code {
+    max-width: 620px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.si-toggle-spacer {
+    display: inline-block;
+    width: 22px;
+}
+
+.si-toggle.is-loading {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
 .storage-inspector code {
     white-space: nowrap;
 }
