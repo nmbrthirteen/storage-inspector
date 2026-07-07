@@ -12,9 +12,9 @@ final class Scanner {
 	public const LARGE_FILE_BYTES = 52428800;
 	public const BIG_FILE_BYTES   = 2097152;
 	public const BIG_MEDIA_BYTES  = 1048576;
-	public const FOLDER_MAX_DEPTH = 6;
+	public const FOLDER_MAX_DEPTH = 10;
 
-	private const FOLDER_MAX_ROWS    = 10000;
+	private const FOLDER_MAX_ROWS    = 20000;
 	private const BATCH_DIRS         = 80;
 	private const WORKER_MAX_SECONDS = 15;
 	private const WORKER_RETRY_DELAY = 2;
