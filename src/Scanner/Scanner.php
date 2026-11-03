@@ -8,6 +8,7 @@ final class Scanner {
 
 	public const CRON_HOOK        = 'storage_inspector_cron_scan';
 	public const LOCK_KEY         = 'storage_inspector_scan_lock';
+	public const LOCK_TTL         = 60;
 	public const HUGE_FILE_BYTES  = 1073741824;
 	public const LARGE_FILE_BYTES = 52428800;
 	public const BIG_FILE_BYTES   = 2097152;
@@ -47,8 +48,12 @@ final class Scanner {
 		return $this->public_state( $state );
 	}
 
+	public function is_running(): bool {
+		return ( $this->store->state()['status'] ?? '' ) === 'running';
+	}
+
 	public function cron_scan(): void {
-		if ( get_transient( self::LOCK_KEY ) ) {
+		if ( $this->is_locked() ) {
 			$this->ensure_scheduled( self::FALLBACK_DELAY );
 			return;
 		}
@@ -76,11 +81,9 @@ final class Scanner {
 	}
 
 	public function process_batch( bool $ensure_fallback = false ): array {
-		if ( get_transient( self::LOCK_KEY ) ) {
+		if ( ! $this->acquire_lock() ) {
 			return $this->state();
 		}
-
-		set_transient( self::LOCK_KEY, time(), 60 );
 
 		try {
 			wp_raise_memory_limit( 'admin' );
@@ -90,21 +93,42 @@ final class Scanner {
 				return $this->public_state( $state );
 			}
 
-			$root       = (string) $state['root'];
-			$classifier = new Classifier();
+			$root = (string) $state['root'];
+
+			$plugins = $this->store->plugins();
+			if ( ! $plugins ) {
+				$plugins = Classifier::plugin_index();
+				$this->store->save_plugins( $plugins );
+			}
+
+			$classifier = new Classifier( $plugins );
 			$groups     = $this->store->groups();
 			$folders    = $this->store->folders();
-			$files      = $this->store->files();
+			$seen       = $this->store->seen();
 			$errors     = $this->store->errors();
+			$new_files  = [];
 			$processed  = 0;
+			$wp_root    = Path::normalize( ABSPATH );
 
-				while ( ! empty( $state['queue'] ) && $processed < self::BATCH_DIRS ) {
-					$dir = Path::normalize( (string) array_shift( $state['queue'] ) );
-					if ( ! Path::inside( $dir, $root ) || is_link( $dir ) ) {
-						continue;
-					}
+			while ( ! empty( $state['queue'] ) && $processed < self::BATCH_DIRS ) {
+				$queued = (string) array_shift( $state['queue'] );
+				if ( is_link( $queued ) ) {
+					continue;
+				}
 
-					$state['dirs']++;
+				$dir = Path::normalize( $queued );
+				if ( ! Path::inside( $dir, $root ) ) {
+					continue;
+				}
+
+				// Guards against loops that survive symlink skipping, such as bind mounts.
+				$seen_key = substr( md5( $dir ), 0, 16 );
+				if ( isset( $seen[ $seen_key ] ) ) {
+					continue;
+				}
+				$seen[ $seen_key ] = 1;
+
+				$state['dirs']++;
 				$processed++;
 
 				$group = $classifier->classify( $dir, $root );
@@ -125,8 +149,12 @@ final class Scanner {
 						continue;
 					}
 
+					if ( is_link( $entry->getPathname() ) ) {
+						continue;
+					}
+
 					$path = Path::normalize( $entry->getPathname() );
-					if ( ! Path::inside( $path, $root ) || is_link( $path ) ) {
+					if ( ! Path::inside( $path, $root ) ) {
 						continue;
 					}
 
@@ -148,14 +176,14 @@ final class Scanner {
 
 					$relative = Path::relative( $path, $root );
 					$this->add_folder_totals( $folders, $relative, $size );
-					$wp_relative = Path::inside( $path, Path::normalize( ABSPATH ) )
-						? Path::relative( $path, Path::normalize( ABSPATH ) )
+					$wp_relative = Path::inside( $path, $wp_root )
+						? Path::relative( $path, $wp_root )
 						: $relative;
 					if ( $this->is_large_file( $relative, $size )
 						|| $this->is_cleanup_candidate_file( $relative, $size )
 						|| $this->is_cleanup_candidate_file( $wp_relative, $size ) ) {
-						$reason             = $this->cleanup_reason( $relative, $wp_relative, $size, $group );
-						$files[ $relative ] = $this->row( $relative, 'file', $size, $group, $this->cleanup->can_delete( $path, $root ), $reason );
+						$reason                = $this->cleanup_reason( $relative, $wp_relative, $size, $group );
+						$new_files[ $relative ] = $this->row( $relative, 'file', $size, $group, $reason );
 					}
 				}
 			}
@@ -173,8 +201,9 @@ final class Scanner {
 			$this->store->save_state( $state );
 			$this->store->save_groups( $groups );
 			$this->store->save_folders( $this->prune_folders( $folders ) );
-			$this->store->save_files( $files );
+			$this->store->append_files( $new_files );
 			$this->store->save_errors( $errors );
+			$this->store->save_seen( $seen );
 
 			if ( $ensure_fallback && ( $state['status'] ?? '' ) === 'running' ) {
 				$this->ensure_scheduled( self::FALLBACK_DELAY );
@@ -182,7 +211,7 @@ final class Scanner {
 
 			return $this->public_state( $state );
 		} finally {
-			delete_transient( self::LOCK_KEY );
+			$this->release_lock();
 		}
 	}
 
@@ -238,6 +267,7 @@ final class Scanner {
 			if ( ! isset( $folders[ $parent ] ) ) {
 				$folders[ $parent ] = [
 					'path'     => $parent === '' ? __( 'Site root', 'storage-inspector' ) : $parent,
+					'relative' => $parent,
 					'type'     => 'folder',
 					'bytes'    => 0,
 					'files'    => 0,
@@ -245,33 +275,40 @@ final class Scanner {
 				];
 			}
 
-			$folders[ $parent ]['children'][] = $this->format_row( $row );
+			$folders[ $parent ]['children'][] = $row;
 			$folders[ $parent ]['bytes']     += (int) ( $row['bytes'] ?? 0 );
 			$folders[ $parent ]['files']++;
 		}
 
-		foreach ( $folders as &$folder ) {
+		$rows = array_values( $folders );
+		usort(
+			$rows,
+			static function ( array $a, array $b ): int {
+				return ( (int) $b['bytes'] ) <=> ( (int) $a['bytes'] );
+			}
+		);
+
+		$total = count( $rows );
+		$rows  = array_slice( $rows, ( $page - 1 ) * $per_page, $per_page );
+		$root  = (string) ( $this->store->state()['root'] ?? $this->scan_root() );
+
+		// Deletability is checked here, for the visible page only, because it touches the filesystem.
+		foreach ( $rows as &$folder ) {
 			usort(
 				$folder['children'],
 				static function ( array $a, array $b ): int {
 					return ( (int) ( $b['bytes'] ?? 0 ) ) <=> ( (int) ( $a['bytes'] ?? 0 ) );
 				}
 			);
-		}
-		unset( $folder );
 
-		$rows = array_values( $folders );
-		usort(
-			$rows,
-			static function ( array $a, array $b ): int {
-				return ( (int) ( $b['bytes'] ?? 0 ) ) <=> ( (int) ( $a['bytes'] ?? 0 ) );
-			}
-		);
-
-		$total = count( $rows );
-		$rows  = array_slice( $rows, ( $page - 1 ) * $per_page, $per_page );
-
-		foreach ( $rows as &$folder ) {
+			$folder['children']   = array_map(
+				function ( array $child ) use ( $root ): array {
+					$child['deletable'] = $this->cleanup->can_delete( $this->absolute( $root, (string) ( $child['path'] ?? '' ) ), $root );
+					return $this->format_row( $child );
+				},
+				$folder['children']
+			);
+			$folder['deletable']  = $folder['relative'] !== '' && $this->cleanup->can_delete( $this->absolute( $root, $folder['relative'] ), $root );
 			$folder['bytesHuman'] = size_format( (int) $folder['bytes'], 2 );
 		}
 		unset( $folder );
@@ -283,6 +320,10 @@ final class Scanner {
 			'perPage'   => $per_page,
 			'totalPages'=> (int) ceil( $total / $per_page ),
 		];
+	}
+
+	private function absolute( string $root, string $relative ): string {
+		return Path::normalize( $root . DIRECTORY_SEPARATOR . ltrim( $relative, '/\\' ), false );
 	}
 
 	private function folder_rows( string $parent, int $limit ): array {
@@ -384,15 +425,18 @@ final class Scanner {
 	}
 
 	public function delete( string $relative ): bool|\WP_Error {
-		if ( get_transient( self::LOCK_KEY ) ) {
+		if ( $this->is_locked() ) {
 			return new \WP_Error( 'storage_inspector_scan_running', __( 'A scan is currently running. Wait for the current batch to finish before deleting files.', 'storage-inspector' ), [ 'status' => 409 ] );
 		}
 
 		$this->cancel();
 
-		$root = $this->scan_root();
-		$path = Path::normalize( $root . DIRECTORY_SEPARATOR . ltrim( $relative, '/\\' ) );
-		$res  = $this->cleanup->delete( $path, $root );
+		$root    = $this->scan_root();
+		$path    = $this->absolute( $root, $relative );
+		$deleted = [];
+		$res     = $this->cleanup->delete( $path, $root, $deleted );
+
+		$this->forget_paths( $deleted );
 
 		if ( is_wp_error( $res ) ) {
 			return $res;
@@ -402,19 +446,22 @@ final class Scanner {
 			return new \WP_Error( 'storage_inspector_delete_failed', __( 'Delete failed. Check filesystem permissions.', 'storage-inspector' ), [ 'status' => 500 ] );
 		}
 
-		$this->forget_path( ltrim( str_replace( '\\', '/', $relative ), '/' ) );
 		return true;
 	}
 
-	private function forget_path( string $relative ): void {
+	/** @param string[] $relatives Paths relative to the scan root that no longer exist. */
+	private function forget_paths( array $relatives ): void {
+		if ( ! $relatives ) {
+			return;
+		}
+
+		$gone          = array_fill_keys( array_map( static fn( string $p ): string => ltrim( str_replace( '\\', '/', $p ), '/' ), $relatives ), true );
 		$files         = $this->store->files();
-		$prefix        = $relative . '/';
 		$removed_files = 0;
 		$removed_bytes = 0;
 
 		foreach ( $files as $key => $row ) {
-			$normalized = ltrim( str_replace( '\\', '/', (string) $key ), '/' );
-			if ( $normalized !== $relative && strncmp( $normalized, $prefix, strlen( $prefix ) ) !== 0 ) {
+			if ( ! isset( $gone[ ltrim( str_replace( '\\', '/', (string) $key ), '/' ) ] ) ) {
 				continue;
 			}
 
@@ -457,7 +504,53 @@ final class Scanner {
 
 	public function cancel(): void {
 		wp_clear_scheduled_hook( self::CRON_HOOK );
-		delete_transient( self::LOCK_KEY );
+		$this->release_lock();
+	}
+
+	/**
+	 * add_option is an atomic insert, so only one worker wins. The value is the
+	 * expiry time, which lets a crashed worker's lock be taken over by compare-and-swap.
+	 */
+	private function acquire_lock(): bool {
+		global $wpdb;
+
+		$expires = time() + self::LOCK_TTL;
+		if ( add_option( self::LOCK_KEY, $expires, '', false ) ) {
+			return true;
+		}
+
+		$current = $this->lock_expiry();
+		if ( $current > time() ) {
+			return false;
+		}
+
+		$taken = $wpdb->query(
+			$wpdb->prepare(
+				"UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s",
+				(string) $expires,
+				self::LOCK_KEY,
+				(string) $current
+			)
+		);
+		wp_cache_delete( self::LOCK_KEY, 'options' );
+
+		return $taken === 1;
+	}
+
+	private function release_lock(): void {
+		delete_option( self::LOCK_KEY );
+	}
+
+	private function is_locked(): bool {
+		return $this->lock_expiry() > time();
+	}
+
+	private function lock_expiry(): int {
+		global $wpdb;
+
+		return (int) $wpdb->get_var(
+			$wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", self::LOCK_KEY )
+		);
 	}
 
 	private function public_state( array $state ): array {
@@ -502,7 +595,7 @@ final class Scanner {
 		$groups[ $key ]['dirs']  += $dirs;
 	}
 
-	private function row( string $path, string $type, int $bytes, array $group, bool $deletable, string $reason = '', int $files = 0 ): array {
+	private function row( string $path, string $type, int $bytes, array $group, string $reason = '', int $files = 0 ): array {
 		if ( $reason === '' ) {
 			$reason = $type === 'folder'
 				? sprintf( __( 'Recursive folder total across %s files.', 'storage-inspector' ), number_format_i18n( $files ) )
@@ -516,7 +609,6 @@ final class Scanner {
 			'area'      => $group['label'],
 			'areaType'  => $group['type'],
 			'reason'    => $reason,
-			'deletable' => $deletable,
 		];
 	}
 

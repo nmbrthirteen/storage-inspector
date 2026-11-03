@@ -17,14 +17,16 @@ Storage Inspector is a WordPress admin tool that scans the main web root when av
 
 ## Safety model
 
-Storage Inspector blocks deletion for WordPress core, root config files, plugin code, theme code, and Storage Inspector itself.
+Storage Inspector blocks deletion for WordPress core, root config files, plugin code, mu-plugin code, theme code, the uploads and content directory roots, and Storage Inspector itself. Protected areas are resolved to real paths from `WP_PLUGIN_DIR`, `WPMU_PLUGIN_DIR`, `get_theme_root()`, and `WP_CONTENT_DIR`, so custom content directories are covered.
 
 Deletion is only exposed for:
 
-- files in `wp-content/uploads/`
-- generated cache/temp/upgrade directories
-- known backup plugin directories such as `wp-content/updraft/` and `wp-content/ai1wm-backups/`
-- backup, export, dump, archive, and log files
+- media files in `wp-content/uploads/` that map to a WordPress attachment
+- generated directories inside the content directory: `cache`, `upgrade`, `upgrade-temp-backup`, plus `ai1wm-backups`, `updraft`, and `backups`
+- the contents of the PHP temp directory, when `get_temp_dir()` is inside the WordPress install
+- backup archives, database dumps, and log files, matched by extension (`zip`, `tar`, `gz`, `sql`, `bak`, `old`, `wpress`, `log`) and never for code files
+
+Folder deletion checks every entry in the tree before removing anything. If a delete fails partway, the message lists what was removed and what remains.
 
 When a media file maps to a WordPress attachment, deletion is routed through `wp_delete_attachment()` so WordPress can remove attachment metadata and generated sizes. Files that are not registered as attachments are deleted from the filesystem only.
 

@@ -37,6 +37,6 @@ final class Plugin {
 
 	public static function deactivate(): void {
 		wp_clear_scheduled_hook( Scanner::CRON_HOOK );
-		delete_transient( Scanner::LOCK_KEY );
+		delete_option( Scanner::LOCK_KEY );
 	}
 }

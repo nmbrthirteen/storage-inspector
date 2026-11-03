@@ -9,18 +9,27 @@ final class Classifier {
 	/** @var array<string,array<string,mixed>> */
 	private array $plugins = [];
 
-	public function __construct() {
+	/**
+	 * @param array<string,array<string,mixed>>|null $plugins Pre-built index from plugin_index(), cached by the scanner.
+	 */
+	public function __construct( ?array $plugins = null ) {
+		$this->plugins = $plugins ?? self::plugin_index();
+	}
+
+	/** @return array<string,array<string,mixed>> */
+	public static function plugin_index(): array {
 		if ( ! function_exists( 'get_plugins' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/plugin.php';
 		}
 
+		$index = [];
 		foreach ( get_plugins() as $file => $data ) {
 			$slug = dirname( $file );
 			if ( $slug === '.' ) {
 				$slug = basename( $file, '.php' );
 			}
 
-			$this->plugins[ $slug ] = [
+			$index[ $slug ] = [
 				'slug'    => $slug,
 				'name'    => $data['Name'] ?? $slug,
 				'version' => $data['Version'] ?? '',
@@ -30,6 +39,8 @@ final class Classifier {
 				'icon'    => 'dashicons-admin-plugins',
 			];
 		}
+
+		return $index;
 	}
 
 	public function classify( string $path, string $root, int $size = 0 ): array {
