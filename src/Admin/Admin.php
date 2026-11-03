@@ -42,6 +42,12 @@ final class Admin {
 			return;
 		}
 
+		// Other admin screens only need the script to show the progress banner while a scan runs.
+		$running = $this->scanner->is_running();
+		if ( $hook !== $this->hook && ! $running ) {
+			return;
+		}
+
 		wp_enqueue_style( 'storage-inspector-admin', STORAGE_INSPECTOR_URL . 'assets/css/admin.css', [], $this->asset_version( 'assets/css/admin.css' ) );
 		wp_enqueue_script( 'storage-inspector-admin', STORAGE_INSPECTOR_URL . 'assets/js/admin.js', [], $this->asset_version( 'assets/js/admin.js' ), true );
 
@@ -53,6 +59,7 @@ final class Admin {
 				'nonce'           => wp_create_nonce( self::NONCE ),
 				'pageUrl'         => admin_url( 'tools.php?page=' . self::SLUG ),
 				'isInspectorPage' => $hook === $this->hook,
+				'scanRunning'     => $running,
 				'i18n'            => $this->strings(),
 				]
 			);

@@ -65,7 +65,9 @@
             });
         }
 
-        fetchState();
+        if (StorageInspector.isInspectorPage || StorageInspector.scanRunning) {
+            fetchState();
+        }
         if (StorageInspector.isInspectorPage) {
             fetchRows();
         }
@@ -512,14 +514,18 @@
             '<td><span class="si-muted">' + escapeHtml(i18n.folder || 'Folder') + '</span></td>' +
             '<td>' + sizeLabel(group.bytesHuman || '0 B') + '</td>' +
             '<td>' + count + '</td>' +
-            '<td></td>' +
+            '<td>' + (group.relative ? actionCell(group.deletable, group.relative, 'folder') : '') + '</td>' +
         '</tr>' + children;
     }
 
-    function childRow(child, index, open) {
-        const action = child.deletable
-            ? '<button type="button" class="button-link-delete si-delete" data-path="' + escapeAttr(child.path) + '" data-type="' + escapeAttr(child.type) + '">' + escapeHtml(i18n.delete || 'Delete') + '</button>'
+    function actionCell(deletable, path, type) {
+        return deletable
+            ? '<button type="button" class="button-link-delete si-delete" data-path="' + escapeAttr(path) + '" data-type="' + escapeAttr(type) + '">' + escapeHtml(i18n.delete || 'Delete') + '</button>'
             : '<span class="si-muted">' + escapeHtml(i18n.protected || 'Protected') + '</span>';
+    }
+
+    function childRow(child, index, open) {
+        const action = actionCell(child.deletable, child.path, child.type);
 
         return '<tr class="si-child-row" data-group="' + index + '"' + (open ? '' : ' hidden') + '>' +
             '<td class="si-child-cell">' + pathCell(child.path || '') + '<div class="si-muted">' + escapeHtml(child.area || '') + '</div></td>' +
